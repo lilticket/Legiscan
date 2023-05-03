@@ -1,0 +1,134 @@
+﻿@page "/graph"
+
+@using Legiscan.Data
+@using System.Drawing
+@using System.Collections.ObjectModel
+@using static Legiscan.Data.GraphController
+@using static Legiscan.Data.Models;
+@inject GraphController GraphController1
+
+
+
+<div>
+    <div hidden="@loadingDiv" style="justify-content:center; padding: 25px; height: 1000px; width: 2000px; background-color: white; position: absolute; z-index: 10">
+        <SfProgressBar Type="ProgressType.Circular" @ref="@Progress" Value="ProgressNum" Minimum="0" Maximum="ProgressMax" TrackThickness="12" ProgressThickness="12" Height="250px" Width="250px">
+        </SfProgressBar>
+        <h4 style="margin-top: 25px; margin-left: 55px;">@loadingText</h4>
+    </div>
+    <div hidden="@searchDiv" style="padding: 25px; height: 1000px; width: 2000px; background-color: white; position: absolute; z-index: 10">
+        <h4>Build Chart</h4>
+        <div style="margin: 25px; padding: 25px; background-color: white; flex:auto; flex-direction:row">
+            <SfButton @ref="ToggleBtn" @onclick="btnBuild_Clicked" IsToggle="true" IsPrimary="true" style="margin-top: 25px;">Build Full Chart</SfButton>
+        </div>
+    </div>
+    <div hidden="@chartDiv">
+        <SfDiagram @ref="@Diagram" Height="1000px" Width="2000px" Layout="@LayoutSetting" Nodes="@NodeCollection" Connectors="@ConnectorCollection" Tool="@DiagramTools.None">
+               <DiagramPageSettings>
+       <DiagramFitOptions CanFit="true" Mode="FitModes.Height"></DiagramFitOptions>
+   </DiagramPageSettings>
+        </SfDiagram>
+    </div>
+</div>
+
+
+
+
+
+@code {
+   TreeInfo LayoutInfo = new TreeInfo()
+   {
+       CanEnableSubTree = true,
+       Orientation = SubTreeOrientation.Horizontal
+   };
+    bool searchDiv { get; set; } = false;
+    bool chartDiv { get; set; } = true;
+    bool loadingDiv { get; set; } = true;
+    public string loadingText = "Loading...";
+    List<PlotPerson> people = new List<PlotPerson>();
+    List<PlotBill> bills = new List<PlotBill>();
+    SfButton ToggleBtn;
+    SfDiagram Diagram;
+    SfProgressBar Progress;
+    public static double ProgressNum { get; set; }
+    double ProgressMax = 0;
+    public BoundaryConstraints boundaryConstraints = BoundaryConstraints.Diagram;
+    public DiagramConstraints Constraints = DiagramConstraints.Tooltip & ~DiagramConstraints.PageEditable;
+    public ObservableCollection<DiagramNode> NodeCollection = new ObservableCollection<DiagramNode>() { };
+    public ObservableCollection<DiagramConnector> ConnectorCollection = new ObservableCollection<DiagramConnector>() { };
+    List<PlotPerson1> nodes = new List<PlotPerson1>();
+    DiagramLayout LayoutSetting = new DiagramLayout()
+        {
+        Type = LayoutType.SymmetricalLayout,
+        SpringFactor = .25,
+        SpringLength = 250,
+        Arrangement = ChildArrangement.Nonlinear,
+        MaxIteration = 100,
+        };
+    protected override async Task OnInitializedAsync()
+    {
+        people = await GraphController1.GetPeople();
+        bills = await GraphController1.GetBills();
+    }
+    private async Task btnBuild_Clicked()
+    {
+        await Task.Run(() =>
+        {
+            searchDiv = true;
+            loadingDiv = false;
+            chartDiv = false;
+            loadingText = "Loading Session 2088...";
+
+        });
+        StateHasChanged();
+
+        (bool success, List<PlotPerson1> plots) = await GraphController1.GenerateNodes();
+        if (success)
+        {
+            nodes = plots;
+            await BuildChart();
+        }
+    }
+    private async Task BuildChart()
+    {
+        (ObservableCollection<DiagramNode> NodeCollection1,ObservableCollection<DiagramConnector> ConnectorCollection1) = await GraphController1.ConfigureNodes(nodes);
+        int total = NodeCollection1.Count + ConnectorCollection1.Count;
+        ProgressMax = total;
+        await Task.Delay(2000);
+        int i = 0;
+
+        StateHasChanged();
+        while (i < NodeCollection1.Count)
+        {
+            await Task.Delay(10);
+            NodeCollection.Add(NodeCollection1[i]);
+            i++;
+            ProgressNum++;
+            Progress.Value = ProgressNum;
+            Progress.RefreshAsync();
+            StateHasChanged();
+        }
+        i = 0;
+        loadingText = "Adding Connections...";
+        while (i < ConnectorCollection1.Count)
+        {
+            await Task.Delay(10);
+            ConnectorCollection.Add(ConnectorCollection1[i]);
+            i++;
+            ProgressNum++;
+            Progress.Value = ProgressNum;
+            Progress.RefreshAsync();
+            StateHasChanged();
+        }
+
+        loadingText = "Configuring layout...";
+        StateHasChanged();
+        await Task.Run(async () =>
+        {
+            await Diagram.DoLayout();
+            await Diagram.FitToPage();
+            await Diagram.UpdateViewPort();
+
+        });
+        loadingDiv = true;
+    }
+}

@@ -1,0 +1,147 @@
+﻿@page "/person"
+
+@using Legiscan.Data
+@using System.Drawing
+@using System.Collections.ObjectModel
+@using static Legiscan.Data.GraphController
+@using static Legiscan.Data.Models;
+@inject PersonController PersonController1
+
+
+
+<div>
+    <div hidden="@loadingDiv" style="justify-content:center; padding: 25px; height: 1000px; width: 2000px; background-color: white; position: absolute; z-index: 10">
+        <SfProgressBar Type="ProgressType.Circular" @ref="@Progress" Value="ProgressNum" Minimum="0" Maximum="ProgressMax" TrackThickness="12" ProgressThickness="12" Height="250px" Width="250px">
+        </SfProgressBar>
+        <h4 style="margin-top: 25px; margin-left: 55px;">@loadingText</h4>
+    </div>
+    <div hidden="@searchDiv" style="padding: 25px; height: 1000px; width: 2000px; background-color: white; position: absolute; z-index: 10">
+        <h4>Build Chart</h4>
+        <sub>*Note: The latest session interacted with over 2 thousand bills, and this chart builder simply cannot handle that (Yet!). Please Try to be specific with your searches or it might break and maybe you'll die idk.</sub>
+        <div style="margin: 25px; padding: 25px; background-color: white; flex:auto; flex-direction:row">
+            <h6 style="margin-top: 25px;">By Person</h6>
+            <SfAutoComplete TValue="string" TItem="PlotPerson" Placeholder="Jane Doe" @bind-Value="@peopleSearch" DataSource="@people">
+                <AutoCompleteFieldSettings Value="Name" />
+            </SfAutoComplete>
+            <h6 style="margin-top: 25px;">By Bill</h6>
+            <SfAutoComplete TValue="string" TItem="PlotBill" Placeholder="Can't even think of an example bill" @bind-Value="@billSearch" DataSource="@bills">
+                <AutoCompleteFieldSettings Value="Label" />
+            </SfAutoComplete>
+            <p>@nullSearchText</p>
+            <SfButton @ref="ToggleBtn" @onclick="btnBuild_Clicked" IsToggle="true" IsPrimary="true" style="margin-top: 25px;">Build Chart</SfButton>
+        </div>
+    </div>
+    <div hidden="@chartDiv" Height="1000px" Width="2000px">
+        <SfDiagram @ref="@Diagram" Height="1000px" Width="2000px" Layout="@LayoutSetting" Nodes="@NodeCollection" Connectors="@ConnectorCollection">
+            <PageSettingsMargin Left="10" Top="10" Bottom="10" />
+        </SfDiagram>
+    </div>
+</div>
+
+
+
+
+
+@code {
+    bool searchDiv { get; set; } = false;
+    bool chartDiv { get; set; } = true;
+    bool loadingDiv { get; set; } = true;
+    public string billSearch;
+    public string peopleSearch;
+    public string nullSearchText;
+    public string loadingText = "Loading...";
+    List<PlotPerson> people = new List<PlotPerson>();
+    List<PlotBill> bills = new List<PlotBill>();
+    SfButton ToggleBtn;
+    SfDiagram Diagram;
+    SfProgressBar Progress;
+    public static double ProgressNum { get; set; }
+    double ProgressMax = 0;
+    //public DiagramConstraints Constraints = DiagramConstraints.Default | DiagramConstraints.Virtualization;
+    public ObservableCollection<DiagramNode> NodeCollection = new ObservableCollection<DiagramNode>() { };
+    public ObservableCollection<DiagramConnector> ConnectorCollection = new ObservableCollection<DiagramConnector>() { };
+    List<PlotPerson1> nodes = new List<PlotPerson1>();
+    DiagramLayout LayoutSetting = new DiagramLayout()
+        {
+        Type = LayoutType.SymmetricalLayout,
+        SpringFactor = 1,
+        SpringLength = 150,
+        Arrangement = ChildArrangement.Nonlinear,
+        MaxIteration = 500,
+        };
+
+    protected override async Task OnInitializedAsync()
+    {
+        //"20968"
+        people = await PersonController1.GetPeople();
+        bills = await PersonController1.GetBills();
+    }
+    private async Task btnBuild_Clicked()
+    {
+        await Task.Run(() =>
+        {
+            var id = people.Find(p => p.Name == peopleSearch).Id;
+            searchDiv = true;
+            loadingDiv = false;
+            loadingText = "Loading " + peopleSearch + "...";
+            StateHasChanged();
+        });
+
+
+        (bool success, List<PlotPerson1> plots) = await PersonController1.GenerateNodes(people.Find(p => p.Name == peopleSearch).Id);
+        if (success)
+        {
+            nodes = plots;
+            await BuildChart();
+        }
+        else
+        {
+            nullSearchText = "No results found.";
+        }
+    }
+    private async Task BuildChart()
+    {
+        (ObservableCollection<DiagramNode> NodeCollection1,ObservableCollection<DiagramConnector> ConnectorCollection1) = await PersonController1.ConfigureNodes(nodes);
+        int total = NodeCollection1.Count + ConnectorCollection1.Count;
+        ProgressMax = total;
+        await Task.Delay(2000);
+        int i = 0;
+        chartDiv = false;
+        StateHasChanged();
+        while (i < NodeCollection1.Count)
+        {
+            await Task.Delay(10);
+            NodeCollection.Add(NodeCollection1[i]);
+            i++;
+            ProgressNum++;
+            Progress.Value = ProgressNum;
+            Progress.RefreshAsync();
+            StateHasChanged();
+        }
+        i = 0;
+        loadingText = "Adding Connections...";
+        while (i < ConnectorCollection1.Count)
+        {
+            await Task.Delay(10);
+            ConnectorCollection.Add(ConnectorCollection1[i]);
+            i++;
+            ProgressNum++;
+            Progress.Value = ProgressNum;
+            Progress.RefreshAsync();
+            StateHasChanged();
+        }
+        loadingText = "Configuring layout...";
+        try
+        {
+            await Diagram.DoLayout();
+            await Diagram.FitToPage();
+        }
+        catch (Exception e)
+        {
+            string m = e.Message;
+            var d = e.Data;
+            var x = e.Source;
+        }
+        loadingDiv = true;
+    }
+}
